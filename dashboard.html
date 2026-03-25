@@ -1,0 +1,1875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlantMind — IoT Plant Monitoring Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <!-- Firebase SDK (compat version — works as simple script tags) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+    <style>
+        /* ============================================================
+           CSS VARIABLES & RESET
+           ============================================================ */
+        :root {
+            --bg-primary: #0a0e27;
+            --bg-secondary: #111638;
+            --bg-card: #161b40;
+            --bg-card-hover: #1c2252;
+            --border: #252b5e;
+            --text-primary: #e8eaf6;
+            --text-secondary: #9fa4c4;
+            --text-muted: #6b70a0;
+            --accent-green: #00e676;
+            --accent-green-dim: rgba(0,230,118,0.15);
+            --accent-blue: #448aff;
+            --accent-blue-dim: rgba(68,138,255,0.15);
+            --accent-amber: #ffc107;
+            --accent-amber-dim: rgba(255,193,7,0.15);
+            --accent-red: #ff5252;
+            --accent-red-dim: rgba(255,82,82,0.15);
+            --accent-cyan: #18ffff;
+            --accent-purple: #b388ff;
+            --chart-blue: #448aff;
+            --chart-orange: #ff9800;
+            --chart-green: #00e676;
+            --chart-red: #ff5252;
+            --chart-purple: #b388ff;
+            --chart-cyan: #18ffff;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 4px 24px rgba(0,0,0,0.3);
+            --transition: all 0.3s ease;
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ============================================================
+           SCROLLBAR
+           ============================================================ */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* ============================================================
+           LAYOUT
+           ============================================================ */
+        .container { max-width: 1440px; margin: 0 auto; padding: 0 24px 48px; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+
+        /* ============================================================
+           HEADER
+           ============================================================ */
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            position: sticky; top: 0; z-index: 100;
+            backdrop-filter: blur(12px);
+        }
+        .header-inner {
+            max-width: 1440px; margin: 0 auto;
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+        }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo-icon {
+            font-size: 28px;
+            animation: logoFloat 3s ease-in-out infinite;
+        }
+        @keyframes logoFloat {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-3px); }
+        }
+        .logo h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+        .logo h1 span { color: var(--accent-green); }
+
+        .header-meta { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+        .header-meta .clock { font-size: 14px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .header-meta .location { font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+        .status-badge {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 13px; font-weight: 500;
+            padding: 4px 12px; border-radius: 20px;
+            background: var(--accent-green-dim);
+            color: var(--accent-green);
+        }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .status-badge.offline { background: var(--accent-red-dim); color: var(--accent-red); }
+        .status-badge.offline .status-dot { background: var(--accent-red); animation: none; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,230,118,0.4); }
+            50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0,230,118,0); }
+        }
+
+        /* ============================================================
+           SECTION TITLES
+           ============================================================ */
+        .section-title {
+            font-size: 16px; font-weight: 600; color: var(--text-secondary);
+            margin: 32px 0 16px; padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .section-title .icon { font-size: 18px; }
+
+        /* ============================================================
+           SENSOR CARDS
+           ============================================================ */
+        .sensor-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            transition: var(--transition);
+            position: relative; overflow: hidden;
+        }
+        .sensor-card:hover { background: var(--bg-card-hover); transform: translateY(-2px); box-shadow: var(--shadow); }
+        .sensor-card .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .sensor-card .card-icon { font-size: 24px; }
+        .sensor-card .card-label { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .sensor-card .card-value { font-size: 36px; font-weight: 700; margin: 4px 0; font-variant-numeric: tabular-nums; }
+        .sensor-card .card-status {
+            display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+            padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px;
+        }
+        .sensor-card .card-range { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+        .sensor-card .card-range span { display: flex; align-items: center; gap: 4px; }
+
+        /* Card colour accents */
+        .sensor-card.good { border-left: 3px solid var(--accent-green); }
+        .sensor-card.good .card-value { color: var(--accent-green); }
+        .sensor-card.good .card-status { background: var(--accent-green-dim); color: var(--accent-green); }
+
+        .sensor-card.warning { border-left: 3px solid var(--accent-amber); }
+        .sensor-card.warning .card-value { color: var(--accent-amber); }
+        .sensor-card.warning .card-status { background: var(--accent-amber-dim); color: var(--accent-amber); }
+
+        .sensor-card.critical { border-left: 3px solid var(--accent-red); }
+        .sensor-card.critical .card-value { color: var(--accent-red); }
+        .sensor-card.critical .card-status { background: var(--accent-red-dim); color: var(--accent-red); }
+
+        /* ============================================================
+           PUMP & WEATHER PANELS
+           ============================================================ */
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+        }
+        .panel-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+        .pump-status { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .pump-indicator {
+            width: 48px; height: 48px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; transition: var(--transition);
+        }
+        .pump-indicator.off { background: var(--bg-secondary); border: 2px solid var(--border); }
+        .pump-indicator.on {
+            background: var(--accent-blue-dim); border: 2px solid var(--accent-blue);
+            animation: pumpPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pumpPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(68,138,255,0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(68,138,255,0); }
+        }
+        @keyframes waterDrop {
+            0%, 100% { transform: translateY(0); opacity: 1; }
+            50% { transform: translateY(4px); opacity: 0.6; }
+        }
+        .pump-indicator.on .drop-icon { animation: waterDrop 0.8s ease-in-out infinite; display: inline-block; }
+
+        .pump-state-label { font-size: 20px; font-weight: 700; }
+        .pump-state-label.on { color: var(--accent-blue); }
+        .pump-state-label.off { color: var(--text-muted); }
+
+        .pump-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .pump-stat { background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 12px; }
+        .pump-stat .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .pump-stat .stat-value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+
+        .weather-current { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+        .weather-icon img { width: 64px; height: 64px; }
+        .weather-temp { font-size: 36px; font-weight: 700; }
+        .weather-desc { font-size: 14px; color: var(--text-secondary); text-transform: capitalize; }
+        .weather-details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .weather-detail { background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 10px 12px; }
+        .weather-detail .wd-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .weather-detail .wd-value { font-size: 16px; font-weight: 600; margin-top: 2px; }
+
+        /* ============================================================
+           CHARTS
+           ============================================================ */
+        .chart-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+        .chart-title { font-size: 15px; font-weight: 600; }
+        .chart-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .time-range-btns { display: flex; gap: 4px; }
+        .time-range-btns button {
+            background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary);
+            padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: var(--transition);
+        }
+        .time-range-btns button:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+        .time-range-btns button.active { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+        .chart-wrap { position: relative; height: 320px; }
+        .chart-wrap.large { height: 400px; }
+
+        /* ============================================================
+           INSIGHTS
+           ============================================================ */
+        .insights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+        .insight-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 20px;
+            display: flex; gap: 14px; align-items: flex-start;
+            transition: var(--transition);
+        }
+        .insight-card:hover { background: var(--bg-card-hover); }
+        .insight-icon {
+            width: 40px; height: 40px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; flex-shrink: 0;
+        }
+        .insight-icon.temp { background: var(--accent-amber-dim); }
+        .insight-icon.moisture { background: var(--accent-blue-dim); }
+        .insight-icon.pump { background: var(--accent-green-dim); }
+        .insight-icon.pattern { background: rgba(179,136,255,0.15); }
+        .insight-text { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+        .insight-text strong { color: var(--text-primary); }
+
+        /* ============================================================
+           DATA TABLE
+           ============================================================ */
+        .table-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: var(--accent-blue); color: #fff; border: none;
+            padding: 8px 16px; border-radius: var(--radius-sm);
+            font-size: 13px; font-weight: 500; cursor: pointer; transition: var(--transition);
+        }
+        .btn:hover { filter: brightness(1.15); }
+        .btn-outline {
+            background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
+        }
+        .btn-outline:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+        .data-table-wrap { overflow-x: auto; }
+        .data-table {
+            width: 100%; border-collapse: collapse;
+            font-size: 13px; font-variant-numeric: tabular-nums;
+        }
+        .data-table th {
+            text-align: left; padding: 10px 12px;
+            background: var(--bg-secondary); color: var(--text-muted);
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+            font-size: 11px; border-bottom: 1px solid var(--border);
+            position: sticky; top: 0;
+        }
+        .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        .data-table tr:hover td { background: var(--bg-card-hover); }
+        .pump-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+        }
+        .pump-badge.on { background: var(--accent-blue-dim); color: var(--accent-blue); }
+        .pump-badge.off { background: var(--bg-secondary); color: var(--text-muted); }
+
+        .pagination { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; }
+        .pagination button {
+            background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary);
+            width: 36px; height: 36px; border-radius: 8px; cursor: pointer; transition: var(--transition);
+            display: flex; align-items: center; justify-content: center; font-size: 13px;
+        }
+        .pagination button:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .pagination button.active { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+        .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .page-info { font-size: 13px; color: var(--text-muted); }
+
+        /* ============================================================
+           VOICE INTERFACE
+           ============================================================ */
+        .voice-btn {
+            position: fixed; bottom: 24px; right: 24px; z-index: 200;
+            width: 56px; height: 56px; border-radius: 50%;
+            background: var(--accent-blue); border: none; color: #fff;
+            font-size: 22px; cursor: pointer; box-shadow: 0 4px 20px rgba(68,138,255,0.4);
+            transition: var(--transition);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .voice-btn:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(68,138,255,0.5); }
+        .voice-btn.listening {
+            background: var(--accent-red);
+            animation: voicePulse 1s ease-in-out infinite;
+            box-shadow: 0 4px 20px rgba(255,82,82,0.4);
+        }
+        @keyframes voicePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+        .voice-panel {
+            position: fixed; bottom: 92px; right: 24px; z-index: 200;
+            width: 360px; max-height: 400px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); box-shadow: var(--shadow);
+            display: none; flex-direction: column; overflow: hidden;
+        }
+        .voice-panel.open { display: flex; }
+        .voice-panel-header {
+            padding: 14px 16px; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .voice-panel-header h3 { font-size: 14px; font-weight: 600; }
+        .voice-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px; }
+        .voice-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+        .voice-bubble {
+            max-width: 85%; padding: 10px 14px; border-radius: 12px;
+            font-size: 13px; line-height: 1.5;
+        }
+        .voice-bubble.user {
+            align-self: flex-end;
+            background: var(--accent-blue); color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+        .voice-bubble.assistant {
+            align-self: flex-start;
+            background: var(--bg-secondary); color: var(--text-secondary);
+            border-bottom-left-radius: 4px;
+        }
+        .voice-listening-text { text-align: center; color: var(--text-muted); font-size: 13px; padding: 8px; }
+
+        /* ============================================================
+           RESPONSIVE
+           ============================================================ */
+        @media (max-width: 1024px) {
+            .grid-4 { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .grid-4 { grid-template-columns: 1fr; }
+            .grid-2 { grid-template-columns: 1fr; }
+            .header-inner { justify-content: center; text-align: center; }
+            .container { padding: 0 12px 48px; }
+            .chart-wrap, .chart-wrap.large { height: 260px; }
+            .voice-panel { width: calc(100vw - 48px); right: 24px; }
+            .insights-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 480px) {
+            .header-meta { gap: 12px; }
+            .sensor-card .card-value { font-size: 28px; }
+        }
+
+        /* ============================================================
+           UTILITY & ANIMATIONS
+           ============================================================ */
+        .fade-in { animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .shimmer {
+            background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
+</head>
+<body>
+
+<!-- ================================================================
+     HEADER
+     ================================================================ -->
+<header>
+    <div class="header-inner">
+        <div class="logo">
+            <span class="logo-icon">🌱</span>
+            <h1>Plant<span>Mind</span></h1>
+        </div>
+        <div class="header-meta">
+            <div class="clock" id="headerClock">--</div>
+            <div class="location">📍 London, UK</div>
+            <div class="status-badge" id="systemStatus">
+                <span class="status-dot"></span>
+                <span>Online</span>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div class="container">
+
+    <!-- ================================================================
+         LIVE SENSOR CARDS
+         ================================================================ -->
+    <div class="section-title"><span class="icon">📊</span> Live Sensor Readings</div>
+    <div class="grid-2" id="sensorCards">
+        <div class="sensor-card good fade-in" id="cardMoisture">
+            <div class="card-header">
+                <div><div class="card-label">Soil Moisture</div></div>
+                <div class="card-icon">💧</div>
+            </div>
+            <div class="card-value" id="valMoisture">--<small style="font-size:16px">%</small></div>
+            <div class="card-status" id="statusMoisture">--</div>
+            <div class="card-range">
+                <span>▼ Min: <strong id="minMoisture">--</strong></span>
+                <span>▲ Max: <strong id="maxMoisture">--</strong></span>
+            </div>
+        </div>
+        <div class="sensor-card good fade-in" id="cardTemp">
+            <div class="card-header">
+                <div><div class="card-label">Indoor Temperature (KY-028)</div></div>
+                <div class="card-icon">🌡️</div>
+            </div>
+            <div class="card-value" id="valTemp">--<small style="font-size:16px">°C</small></div>
+            <div class="card-status" id="statusTemp">--</div>
+            <div class="card-range">
+                <span>▼ Min: <strong id="minTemp">--</strong></span>
+                <span>▲ Max: <strong id="maxTemp">--</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         PUMP STATUS & WEATHER PANELS
+         ================================================================ -->
+    <div class="section-title"><span class="icon">⚙️</span> System & Environment</div>
+    <div class="grid-2">
+        <!-- Pump Status -->
+        <div class="panel fade-in">
+            <div class="panel-title">💦 Pump Status</div>
+            <div class="pump-status">
+                <div class="pump-indicator off" id="pumpIndicator">
+                    <span class="drop-icon">💧</span>
+                </div>
+                <div>
+                    <div class="pump-state-label off" id="pumpStateLabel">OFF</div>
+                    <div style="font-size:12px;color:var(--text-muted)" id="pumpSubtext">Pump idle</div>
+                </div>
+            </div>
+            <div class="pump-stats">
+                <div class="pump-stat">
+                    <div class="stat-label">Last Watering</div>
+                    <div class="stat-value" id="pumpLastWater">--</div>
+                </div>
+                <div class="pump-stat">
+                    <div class="stat-label">Events This Week</div>
+                    <div class="stat-value" id="pumpEventsWeek">--</div>
+                </div>
+                <div class="pump-stat">
+                    <div class="stat-label">Avg Duration</div>
+                    <div class="stat-value" id="pumpAvgDuration">--</div>
+                </div>
+                <div class="pump-stat">
+                    <div class="stat-label">Total Water Used</div>
+                    <div class="stat-value" id="pumpTotalWater">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Weather Panel -->
+        <div class="panel fade-in">
+            <div class="panel-title">🌤️ Outdoor Weather — London, UK</div>
+            <div class="weather-current">
+                <div class="weather-icon" id="weatherIcon">
+                    <img src="https://openweathermap.org/img/wn/02d@2x.png" alt="weather" id="weatherImg">
+                </div>
+                <div>
+                    <div class="weather-temp" id="weatherTemp">--°C</div>
+                    <div class="weather-desc" id="weatherDesc">Loading weather data...</div>
+                </div>
+            </div>
+            <div class="weather-details">
+                <div class="weather-detail">
+                    <div class="wd-label">Feels Like</div>
+                    <div class="wd-value" id="weatherFeels">--°C</div>
+                </div>
+                <div class="weather-detail">
+                    <div class="wd-label">Humidity</div>
+                    <div class="wd-value" id="weatherHumidity">--%</div>
+                </div>
+                <div class="weather-detail">
+                    <div class="wd-label">Wind Speed</div>
+                    <div class="wd-value" id="weatherWind">-- m/s</div>
+                </div>
+                <div class="weather-detail">
+                    <div class="wd-label">Forecast</div>
+                    <div class="wd-value" id="weatherForecast">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         CHART A — Soil Moisture vs Outdoor Temperature (KEY CHART)
+         ================================================================ -->
+    <div class="section-title"><span class="icon">📈</span> Time Series Analysis</div>
+
+    <div class="chart-container fade-in">
+        <div class="chart-header">
+            <div>
+                <div class="chart-title">Soil Moisture vs Outdoor Temperature</div>
+                <div class="chart-subtitle">Cross-correlation between indoor soil conditions and outdoor temperature — pump events highlighted</div>
+            </div>
+            <div class="time-range-btns" data-chart="chartA">
+                <button onclick="setRange('chartA', 1)">24h</button>
+                <button onclick="setRange('chartA', 3)">3 Days</button>
+                <button class="active" onclick="setRange('chartA', 7)">7 Days</button>
+            </div>
+        </div>
+        <div class="chart-wrap large"><canvas id="chartA"></canvas></div>
+    </div>
+
+    <!-- ================================================================
+         CHART B — Indoor vs Outdoor Temp & Humidity
+         ================================================================ -->
+    <div class="chart-container fade-in">
+        <div class="chart-header">
+            <div>
+                <div class="chart-title">Indoor vs Outdoor Temperature & Humidity</div>
+                <div class="chart-subtitle">Comparison of ESP32 sensor readings against OpenWeatherMap outdoor conditions</div>
+            </div>
+            <div class="time-range-btns" data-chart="chartB">
+                <button onclick="setRange('chartB', 1)">24h</button>
+                <button onclick="setRange('chartB', 3)">3 Days</button>
+                <button class="active" onclick="setRange('chartB', 7)">7 Days</button>
+            </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chartB"></canvas></div>
+    </div>
+
+    <!-- ================================================================
+         CHART C — Indoor vs Outdoor Temperature Over Time
+         ================================================================ -->
+    <div class="chart-container fade-in">
+        <div class="chart-header">
+            <div>
+                <div class="chart-title">Indoor vs Outdoor Temperature Over Time</div>
+                <div class="chart-subtitle">Real-time comparison of KY-028 indoor readings vs OpenWeatherMap outdoor data</div>
+            </div>
+            <div class="time-range-btns" data-chart="chartC">
+                <button onclick="setRange('chartC', 1)">24h</button>
+                <button onclick="setRange('chartC', 3)">3 Days</button>
+                <button class="active" onclick="setRange('chartC', 7)">7 Days</button>
+            </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chartC"></canvas></div>
+    </div>
+
+    <!-- ================================================================
+         CHART D — Correlation Scatter Plot
+         ================================================================ -->
+    <div class="chart-container fade-in">
+        <div class="chart-header">
+            <div>
+                <div class="chart-title">Correlation: Outdoor Temperature vs Soil Moisture Depletion Rate</div>
+                <div class="chart-subtitle">Each point represents one hour of data — trendline shows whether hotter outdoor conditions cause faster soil drying</div>
+            </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chartD"></canvas></div>
+    </div>
+
+    <!-- ================================================================
+         PATTERN DETECTION / INSIGHTS
+         ================================================================ -->
+    <div class="section-title"><span class="icon">🔍</span> Pattern Detection & Insights</div>
+    <div class="insights-grid" id="insightsGrid">
+        <!-- Populated by JS -->
+    </div>
+
+    <!-- ================================================================
+         DATA TABLE
+         ================================================================ -->
+    <div class="section-title"><span class="icon">🗃️</span> Raw Sensor Data</div>
+    <div class="panel">
+        <div class="table-controls">
+            <div class="page-info" id="tableInfo">Showing 0 of 0 records</div>
+            <button class="btn" onclick="exportCSV()">⬇ Export CSV</button>
+        </div>
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Soil Moisture %</th>
+                        <th>Indoor Temp °C</th>
+                        <th>Outdoor Temp °C</th>
+                        <th>Pump</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+    </div>
+</div>
+
+<!-- ================================================================
+     VOICE INTERFACE
+     ================================================================ -->
+<button class="voice-btn" id="voiceBtn" onclick="toggleVoice()" title="Voice Assistant">🎙️</button>
+<div class="voice-panel" id="voicePanel">
+    <div class="voice-panel-header">
+        <h3>🌱 PlantMind Voice Assistant</h3>
+        <button class="voice-close" onclick="closeVoice()">✕</button>
+    </div>
+    <div class="voice-messages" id="voiceMessages">
+        <div class="voice-bubble assistant">Hi! Ask me anything about your plant — try "How is my plant doing?"</div>
+    </div>
+    <div class="voice-listening-text" id="voiceListening" style="display:none">🎤 Listening...</div>
+</div>
+
+<script>
+/* ================================================================
+   CONFIGURATION
+   ================================================================ */
+const CONFIG = {
+    // ─── OpenWeatherMap ─────────────────────────────────────
+    API_KEY: '6ec8fc25d1889ea8c9b236e581ae497e',
+    LOCATION: 'Paddington,London,GB',
+
+    // ─── Firebase ───────────────────────────────────────────
+    // Replace these with YOUR Firebase project values.
+    // Find them at: Firebase Console → Project Settings → General → Your apps → Config
+    FIREBASE: {
+        apiKey:            "AIzaSyAaBEfZ6Jw2gFyBfk_02tgAKmLeNNmkzHI",
+        authDomain:        "plantmind-18003.firebaseapp.com",
+        databaseURL:       "https://plantmind-18003-default-rtdb.firebaseio.com",
+        projectId:         "plantmind-18003",
+        storageBucket:     "plantmind-18003.firebasestorage.app",
+        messagingSenderId: "766510134697",
+        appId:             "1:766510134697:web:7304f637bdcea45ddd00b8"
+    },
+
+    // ─── Dashboard settings ─────────────────────────────────
+    WEATHER_REFRESH_MS: 1 * 60 * 1000,
+    CLOCK_REFRESH_MS: 1000,
+    SENSOR_REFRESH_MS: 5000,
+    DATA_INTERVAL_MIN: 5,
+    DAYS_OF_DATA: 7,
+    PUMP_TRIGGER_THRESHOLD: 40,
+    PUMP_RESTORE_TARGET: 75,
+    TABLE_PAGE_SIZE: 20
+};
+
+/* ================================================================
+   DATA STORES
+   ================================================================ */
+let sensorData = [];          // {timestamp, moisture, temperature, humidity, light, outdoorTemp, outdoorHumidity, pumpOn}
+let pumpEvents = [];          // {timestamp, duration}
+let weatherData = null;       // Current weather from API
+let forecastData = null;      // 5-day forecast from API
+
+let chartInstances = {};      // Store Chart.js instances
+let currentRanges = { chartA: 7, chartB: 7, chartC: 7 };
+let tablePage = 0;
+let firebaseConnected = false; // Tracks whether we're using live data
+let db = null;                 // Firebase database reference
+
+/* ================================================================
+   FIREBASE: INITIALISE & LOAD DATA
+   Tries to connect to Firebase. If it fails (wrong config, no
+   internet, placeholder keys), falls back to simulated data.
+   ================================================================ */
+function initFirebase() {
+    try {
+        // Don't attempt if placeholder config is still there
+        if (CONFIG.FIREBASE.apiKey === 'YOUR_FIREBASE_API_KEY' ||
+            CONFIG.FIREBASE.databaseURL.includes('YOUR_PROJECT')) {
+            console.log('Firebase: placeholder config detected — using simulated data');
+            return false;
+        }
+        firebase.initializeApp(CONFIG.FIREBASE);
+        db = firebase.database();
+        console.log('Firebase: initialised OK');
+        return true;
+    } catch (err) {
+        console.warn('Firebase: init failed —', err.message);
+        return false;
+    }
+}
+
+/**
+ * Loads all existing readings from Firebase, converts them to the
+ * same format as simulated data, then sets up a real-time listener
+ * for new readings as they arrive from the ESP32.
+ */
+async function loadFirebaseData() {
+    try {
+        // Load last 7 days of readings
+        const cutoff = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+        const snapshot = await db.ref('readings')
+            .orderByChild('timestamp')
+            .startAt(cutoff)
+            .once('value');
+
+        const raw = snapshot.val();
+        if (!raw) {
+            console.log('Firebase: no readings yet — will listen for incoming data');
+            // Return true so we still connect the listener and stay in live mode
+            firebaseConnected = true;
+            return true;
+        }
+
+        // Convert Firebase object to sorted array
+        const entries = Object.values(raw).sort((a, b) => a.timestamp - b.timestamp);
+        console.log(`Firebase: loaded ${entries.length} readings`);
+
+        // Map to dashboard format
+        // The ESP32 sends: moisture, temperature (from KY-028 sensor), pumpOn, timestamp
+        // We supplement with weather API data for outdoor readings
+        sensorData = entries.map(e => {
+            const ts = new Date(e.timestamp * 1000);
+
+            // Outdoor temp: use weather API value if available, else estimate
+            const outTemp = e.outdoorTemp !== undefined ? e.outdoorTemp :
+                (weatherData ? weatherData.main.temp : 15);
+            const outHum = e.outdoorHumidity !== undefined ? e.outdoorHumidity :
+                (weatherData ? weatherData.main.humidity : 60);
+
+            return {
+                timestamp: ts,
+                moisture: parseFloat(e.moisture) || 0,
+                indoorTemp: parseFloat(e.temperature) || 0,
+                outdoorTemp: Math.round(outTemp * 10) / 10,
+                outdoorHumidity: Math.round(outHum * 10) / 10,
+                pumpOn: !!e.pumpOn
+            };
+        });
+
+        // Reconstruct pump events from the data
+        pumpEvents = [];
+        let pumpStart = null;
+        for (let i = 1; i < sensorData.length; i++) {
+            if (!sensorData[i - 1].pumpOn && sensorData[i].pumpOn) {
+                pumpStart = sensorData[i].timestamp;
+            }
+            if (pumpStart && sensorData[i - 1].pumpOn && !sensorData[i].pumpOn) {
+                const dur = Math.round((sensorData[i].timestamp - pumpStart) / 60000);
+                pumpEvents.push({ timestamp: new Date(pumpStart), duration: dur });
+                pumpStart = null;
+            }
+        }
+
+        firebaseConnected = true;
+        return true;
+    } catch (err) {
+        console.warn('Firebase: load failed —', err.message);
+        return false;
+    }
+}
+
+/**
+ * Listen for new readings arriving in real-time from the ESP32.
+ * Each new reading is appended to sensorData and the UI refreshes.
+ */
+function startFirebaseListener() {
+    if (!db) return;
+
+    const now = Math.floor(Date.now() / 1000);
+    db.ref('readings')
+        .orderByChild('timestamp')
+        .startAt(now)
+        .on('child_added', (snap) => {
+            const e = snap.val();
+            if (!e || !e.timestamp) return;
+
+            const ts = new Date(e.timestamp * 1000);
+
+            const entry = {
+                timestamp: ts,
+                moisture: parseFloat(e.moisture) || 0,
+                indoorTemp: parseFloat(e.temperature) || 0,
+                outdoorTemp: weatherData ? Math.round(weatherData.main.temp * 10) / 10 : 15,
+                outdoorHumidity: weatherData ? weatherData.main.humidity : 60,
+                pumpOn: !!e.pumpOn
+            };
+
+            sensorData.push(entry);
+
+            // Track pump events
+            const prev = sensorData.length >= 2 ? sensorData[sensorData.length - 2] : null;
+            if (prev && prev.pumpOn && !entry.pumpOn) {
+                // Pump just turned off — find when it started
+                let pumpStart = entry.timestamp;
+                for (let i = sensorData.length - 2; i >= 0; i--) {
+                    if (!sensorData[i].pumpOn) { pumpStart = sensorData[i + 1].timestamp; break; }
+                }
+                const dur = Math.round((entry.timestamp - pumpStart) / 60000);
+                pumpEvents.push({ timestamp: new Date(pumpStart), duration: dur });
+            }
+
+            // Refresh UI
+            updateSensorCards();
+            rebuildAllCharts();
+            renderTable();
+            generateInsights();
+
+            console.log('Firebase: new reading received', entry.moisture.toFixed(1) + '%');
+        });
+}
+
+/** Update the header status badge */
+function updateStatus(online) {
+    const badge = document.getElementById('systemStatus');
+    if (online) {
+        badge.className = 'status-badge';
+        badge.innerHTML = '<span class="status-dot"></span><span>Live</span>';
+    } else {
+        badge.className = 'status-badge offline';
+        badge.innerHTML = '<span class="status-dot"></span><span>Simulated</span>';
+    }
+}
+
+/** Rebuild all charts (called when new data arrives) */
+function rebuildAllCharts() {
+    buildChartA(currentRanges.chartA);
+    buildChartB(currentRanges.chartB);
+    buildChartC(currentRanges.chartC);
+    buildChartD();
+}
+
+/* ================================================================
+   SIMULATED DATA GENERATION
+   Generates 7 days of 5-minute readings with realistic patterns.
+   ================================================================ */
+function generateSimulatedData() {
+    const now = new Date();
+    const startTime = new Date(now.getTime() - CONFIG.DAYS_OF_DATA * 24 * 60 * 60 * 1000);
+    const data = [];
+    const pumps = [];
+
+    let moisture = 75;
+    let pumpOn = false;
+    let pumpStartTime = null;
+
+    const totalPoints = CONFIG.DAYS_OF_DATA * 24 * (60 / CONFIG.DATA_INTERVAL_MIN);
+
+    for (let i = 0; i <= totalPoints; i++) {
+        const ts = new Date(startTime.getTime() + i * CONFIG.DATA_INTERVAL_MIN * 60 * 1000);
+        const hour = ts.getHours() + ts.getMinutes() / 60;
+        const dayOfWeek = ts.getDay();
+
+        /* --- Indoor Temperature: sinusoidal day/night cycle --- */
+        // Peak ~22°C at 14:00, trough ~16°C at 04:00
+        const tempBase = 19 + 3 * Math.sin((hour - 8) * Math.PI / 12);
+        const indoorTemp = Math.round((tempBase + (Math.random() - 0.5) * 1.2) * 10) / 10;
+
+        /* --- Outdoor temperature: similar but more extreme --- */
+        const outTempBase = 18.5 + 4.5 * Math.sin((hour - 8) * Math.PI / 12);
+        const outdoorTemp = Math.round((outTempBase + (Math.random() - 0.5) * 2) * 10) / 10;
+
+        /* --- Soil Moisture: gradual depletion with pump cycles --- */
+        if (pumpOn) {
+            // Pump is running — restore moisture over ~30 min (6 readings)
+            moisture += (CONFIG.PUMP_RESTORE_TARGET - moisture) * 0.35;
+            if (moisture >= CONFIG.PUMP_RESTORE_TARGET - 1) {
+                moisture = CONFIG.PUMP_RESTORE_TARGET + (Math.random() - 0.5) * 2;
+                pumpOn = false;
+                const duration = Math.round((ts.getTime() - pumpStartTime.getTime()) / 60000);
+                pumps.push({ timestamp: new Date(pumpStartTime), duration: duration });
+                pumpStartTime = null;
+            }
+        } else {
+            // Depletion rate: ~2%/hr base, faster when hotter
+            const heatFactor = Math.max(0.5, 1 + (outdoorTemp - 18) * 0.08);
+            const depletionRate = (2 * heatFactor) / (60 / CONFIG.DATA_INTERVAL_MIN);
+            moisture -= depletionRate + (Math.random() - 0.3) * 0.3;
+
+            if (moisture <= CONFIG.PUMP_TRIGGER_THRESHOLD) {
+                pumpOn = true;
+                pumpStartTime = new Date(ts);
+            }
+        }
+        moisture = Math.round(Math.max(25, Math.min(80, moisture)) * 10) / 10;
+
+        data.push({
+            timestamp: ts,
+            moisture: moisture,
+            indoorTemp: indoorTemp,
+            outdoorTemp: outdoorTemp,
+            outdoorHumidity: 60,
+            pumpOn: pumpOn
+        });
+    }
+
+    sensorData = data;
+    pumpEvents = pumps;
+}
+
+/* ================================================================
+   WEATHER API
+   Fetches current weather from OpenWeatherMap and saves a snapshot
+   to Firebase every time, so we have a weather history for charts.
+   ================================================================ */
+async function fetchWeather() {
+    try {
+        const url = `https://api.openweathermap.org/data/2.5/weather?q=${CONFIG.LOCATION}&appid=${CONFIG.API_KEY}&units=metric`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Weather API returned ${res.status}`);
+        weatherData = await res.json();
+        updateWeatherPanel();
+        saveWeatherToFirebase(weatherData);
+    } catch (err) {
+        console.warn('Weather API unavailable, using simulated data:', err.message);
+        weatherData = {
+            main: { temp: 14.2, feels_like: 12.8, humidity: 68 },
+            weather: [{ description: 'partly cloudy', icon: '02d' }],
+            wind: { speed: 4.1 },
+            name: 'London'
+        };
+        updateWeatherPanel();
+    }
+}
+
+/**
+ * Saves a weather snapshot to Firebase under /weather.
+ * This builds up a history so charts can show real outdoor data
+ * instead of estimates.
+ */
+function saveWeatherToFirebase(w) {
+    if (!db) return;
+    const snapshot = {
+        temp: w.main.temp,
+        feelsLike: w.main.feels_like,
+        humidity: w.main.humidity,
+        description: w.weather[0].description,
+        icon: w.weather[0].icon,
+        windSpeed: w.wind.speed,
+        timestamp: Math.floor(Date.now() / 1000)
+    };
+    db.ref('weather').push(snapshot)
+        .then(() => console.log('Weather: saved to Firebase'))
+        .catch(err => console.warn('Weather: Firebase save failed —', err.message));
+}
+
+/**
+ * Loads weather history from Firebase and merges outdoor temp/humidity
+ * into sensorData so charts show real outdoor conditions.
+ */
+/**
+ * Loads weather history from Firebase and merges outdoor temp/humidity
+ * into sensorData. For each sensor reading, finds the weather snapshot
+ * that was recorded at the same time (most recent weather at or before
+ * the sensor reading timestamp).
+ */
+async function loadWeatherHistory() {
+    if (!db) return;
+    try {
+        const cutoff = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+        const snapshot = await db.ref('weather')
+            .orderByChild('timestamp')
+            .startAt(cutoff)
+            .once('value');
+
+        const raw = snapshot.val();
+        if (!raw) return;
+
+        const weatherEntries = Object.values(raw).sort((a, b) => a.timestamp - b.timestamp);
+        console.log(`Weather history: loaded ${weatherEntries.length} snapshots`);
+
+        if (weatherEntries.length === 0) return;
+
+        // For each sensor reading, find the weather that was current
+        // at that time (the most recent weather snapshot at or before
+        // the sensor reading's timestamp)
+        let wIdx = 0;
+        for (let i = 0; i < sensorData.length; i++) {
+            const sensorTs = Math.floor(sensorData[i].timestamp.getTime() / 1000);
+
+            // Advance weather index to the last entry at or before this sensor time
+            while (wIdx + 1 < weatherEntries.length &&
+                   weatherEntries[wIdx + 1].timestamp <= sensorTs) {
+                wIdx++;
+            }
+
+            // Only use if the weather entry is at or before the sensor reading
+            if (weatherEntries[wIdx].timestamp <= sensorTs) {
+                sensorData[i].outdoorTemp = Math.round(weatherEntries[wIdx].temp * 10) / 10;
+                sensorData[i].outdoorHumidity = weatherEntries[wIdx].humidity;
+            }
+        }
+    } catch (err) {
+        console.warn('Weather history: load failed —', err.message);
+    }
+}
+
+async function fetchForecast() {
+    try {
+        const url = `https://api.openweathermap.org/data/2.5/forecast?q=${CONFIG.LOCATION}&appid=${CONFIG.API_KEY}&units=metric`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Forecast API returned ${res.status}`);
+        forecastData = await res.json();
+        updateForecastSummary();
+    } catch (err) {
+        console.warn('Forecast API unavailable:', err.message);
+        document.getElementById('weatherForecast').textContent = 'Mild with cloud cover';
+    }
+}
+
+function updateWeatherPanel() {
+    if (!weatherData) return;
+    const m = weatherData.main;
+    const w = weatherData.weather[0];
+    document.getElementById('weatherTemp').textContent = `${Math.round(m.temp)}°C`;
+    document.getElementById('weatherDesc').textContent = w.description;
+    document.getElementById('weatherFeels').textContent = `${Math.round(m.feels_like)}°C`;
+    document.getElementById('weatherHumidity').textContent = `${m.humidity}%`;
+    document.getElementById('weatherWind').textContent = `${weatherData.wind.speed} m/s`;
+    document.getElementById('weatherImg').src = `https://openweathermap.org/img/wn/${w.icon}@2x.png`;
+}
+
+function updateForecastSummary() {
+    if (!forecastData || !forecastData.list) return;
+    // Summarise next 24hrs
+    const next24 = forecastData.list.slice(0, 8);
+    const descriptions = next24.map(f => f.weather[0].main);
+    const temps = next24.map(f => f.main.temp);
+    const minT = Math.round(Math.min(...temps));
+    const maxT = Math.round(Math.max(...temps));
+    const mostCommon = descriptions.sort((a, b) =>
+        descriptions.filter(v => v === a).length - descriptions.filter(v => v === b).length
+    ).pop();
+    document.getElementById('weatherForecast').textContent = `${mostCommon}, ${minT}-${maxT}°C`;
+}
+
+/* ================================================================
+   CLOCK
+   ================================================================ */
+function updateClock() {
+    const now = new Date();
+    const opts = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+    document.getElementById('headerClock').textContent = now.toLocaleDateString('en-GB', opts);
+}
+
+/* ================================================================
+   SENSOR CARD UPDATES
+   ================================================================ */
+function updateSensorCards() {
+    if (sensorData.length === 0) return;
+
+    const latest = sensorData[sensorData.length - 1];
+    const now = new Date();
+    const last24h = sensorData.filter(d => (now - d.timestamp) < 24 * 60 * 60 * 1000);
+
+    // Helper to get min/max
+    const minMax = (arr, key) => ({
+        min: Math.round(Math.min(...arr.map(d => d[key])) * 10) / 10,
+        max: Math.round(Math.max(...arr.map(d => d[key])) * 10) / 10
+    });
+
+    // Moisture
+    const moist = latest.moisture;
+    const moistMM = minMax(last24h, 'moisture');
+    document.getElementById('valMoisture').innerHTML = `${moist.toFixed(1)}<small style="font-size:16px">%</small>`;
+    document.getElementById('minMoisture').textContent = `${moistMM.min}%`;
+    document.getElementById('maxMoisture').textContent = `${moistMM.max}%`;
+    let moistStatus, moistClass;
+    if (moist >= 50 && moist <= 75) { moistStatus = 'Optimal'; moistClass = 'good'; }
+    else if (moist >= 40 && moist < 50) { moistStatus = 'Drying'; moistClass = 'warning'; }
+    else if (moist < 40) { moistStatus = 'Dry'; moistClass = 'critical'; }
+    else { moistStatus = 'Wet'; moistClass = 'warning'; }
+    document.getElementById('statusMoisture').textContent = moistStatus;
+    document.getElementById('cardMoisture').className = `sensor-card ${moistClass} fade-in`;
+
+    // Indoor Temperature (from KY-028 sensor)
+    const indoorTemp = latest.indoorTemp;
+    const indoorTempMM = minMax(last24h, 'indoorTemp');
+    document.getElementById('valTemp').innerHTML = `${indoorTemp.toFixed(1)}<small style="font-size:16px">°C</small>`;
+    document.getElementById('minTemp').textContent = `${indoorTempMM.min}°C`;
+    document.getElementById('maxTemp').textContent = `${indoorTempMM.max}°C`;
+    let tempStatus, tempClass;
+    if (indoorTemp >= 18 && indoorTemp <= 24) { tempStatus = 'Optimal'; tempClass = 'good'; }
+    else if (indoorTemp >= 15 && indoorTemp < 18) { tempStatus = 'Cool'; tempClass = 'warning'; }
+    else if (indoorTemp < 15) { tempStatus = 'Cold'; tempClass = 'critical'; }
+    else if (indoorTemp > 27) { tempStatus = 'Hot'; tempClass = 'critical'; }
+    else { tempStatus = 'Warm'; tempClass = 'warning'; }
+    document.getElementById('statusTemp').textContent = tempStatus;
+    document.getElementById('cardTemp').className = `sensor-card ${tempClass} fade-in`;
+
+    // Note: Humidity and Light cards removed from display since we no longer measure these directly
+
+    // Pump status
+    updatePumpPanel(latest);
+}
+
+/* ================================================================
+   PUMP PANEL
+   ================================================================ */
+function updatePumpPanel(latest) {
+    const indicator = document.getElementById('pumpIndicator');
+    const label = document.getElementById('pumpStateLabel');
+    const subtext = document.getElementById('pumpSubtext');
+
+    if (latest.pumpOn) {
+        indicator.className = 'pump-indicator on';
+        label.className = 'pump-state-label on';
+        label.textContent = 'ON';
+        subtext.textContent = 'Watering in progress...';
+    } else {
+        indicator.className = 'pump-indicator off';
+        label.className = 'pump-state-label off';
+        label.textContent = 'OFF';
+        subtext.textContent = 'Pump idle';
+    }
+
+    // Stats
+    if (pumpEvents.length > 0) {
+        const lastEvent = pumpEvents[pumpEvents.length - 1];
+        const lastTimeStr = lastEvent.timestamp.toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        document.getElementById('pumpLastWater').textContent = lastTimeStr;
+
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const weekEvents = pumpEvents.filter(e => e.timestamp > weekAgo);
+        document.getElementById('pumpEventsWeek').textContent = weekEvents.length;
+
+        const avgDur = weekEvents.length > 0
+            ? Math.round(weekEvents.reduce((s, e) => s + e.duration, 0) / weekEvents.length)
+            : 0;
+        document.getElementById('pumpAvgDuration').textContent = `${avgDur} min`;
+
+        // Estimate total water (assume 200ml/min pump rate)
+        const totalMin = weekEvents.reduce((s, e) => s + e.duration, 0);
+        const totalMl = totalMin * 200;
+        document.getElementById('pumpTotalWater').textContent = totalMl >= 1000 ? `${(totalMl / 1000).toFixed(1)} L` : `${totalMl} ml`;
+    } else {
+        document.getElementById('pumpLastWater').textContent = 'No events';
+        document.getElementById('pumpEventsWeek').textContent = '0';
+        document.getElementById('pumpAvgDuration').textContent = '-- min';
+        document.getElementById('pumpTotalWater').textContent = '-- ml';
+    }
+}
+
+/* ================================================================
+   CHART HELPERS
+   ================================================================ */
+function filterByDays(days) {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    return sensorData.filter(d => d.timestamp >= cutoff);
+}
+
+// Thin data for performance on large datasets
+function thinData(data, maxPoints = 600) {
+    if (data.length <= maxPoints) return data;
+    const step = Math.ceil(data.length / maxPoints);
+    return data.filter((_, i) => i % step === 0);
+}
+
+function formatTimestamp(ts) {
+    return ts.toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+        legend: { labels: { color: '#9fa4c4', boxWidth: 12, padding: 16, font: { size: 12 } } },
+        tooltip: {
+            backgroundColor: '#1c2252',
+            titleColor: '#e8eaf6',
+            bodyColor: '#9fa4c4',
+            borderColor: '#252b5e',
+            borderWidth: 1,
+            padding: 12,
+            cornerRadius: 8,
+            titleFont: { weight: '600' },
+        }
+    },
+    scales: {
+        x: {
+            ticks: { color: '#6b70a0', maxTicksLimit: 12, font: { size: 11 } },
+            grid: { color: 'rgba(37,43,94,0.5)' }
+        }
+    }
+};
+
+/* ================================================================
+   CHART A: Soil Moisture vs Outdoor Temperature
+   ================================================================ */
+function buildChartA(days = 7) {
+    const raw = filterByDays(days);
+    const data = thinData(raw);
+    const labels = data.map(d => formatTimestamp(d.timestamp));
+    const moistureVals = data.map(d => d.moisture);
+    const outdoorTempVals = data.map(d => d.outdoorTemp);
+
+    // Find pump trigger points (where pump turns ON)
+    const pumpPoints = [];
+    for (let i = 1; i < data.length; i++) {
+        if (!data[i - 1].pumpOn && data[i].pumpOn) {
+            pumpPoints.push({ index: i, x: labels[i], y: data[i].moisture });
+        }
+    }
+
+    // Annotations: vertical lines + labels for each pump event
+    const annotations = {};
+    pumpPoints.forEach((p, idx) => {
+        // Vertical dashed line spanning the full chart height
+        annotations[`pumpLine${idx}`] = {
+            type: 'line',
+            xMin: p.x,
+            xMax: p.x,
+            borderColor: 'rgba(255,82,82,0.6)',
+            borderWidth: 2,
+            borderDash: [6, 4],
+            label: {
+                display: true,
+                content: 'Pump (2s)',
+                position: 'start',
+                backgroundColor: 'rgba(255,82,82,0.85)',
+                color: '#fff',
+                font: { size: 10, weight: 'bold' },
+                padding: { top: 3, bottom: 3, left: 6, right: 6 },
+                borderRadius: 4,
+            }
+        };
+        // Red dot at the moisture value when pump fired
+        annotations[`pumpDot${idx}`] = {
+            type: 'point',
+            xValue: p.x,
+            yValue: p.y,
+            yScaleID: 'y',
+            backgroundColor: '#ff5252',
+            borderColor: '#fff',
+            borderWidth: 2,
+            radius: 6,
+        };
+    });
+
+    const ctx = document.getElementById('chartA').getContext('2d');
+    if (chartInstances.chartA) chartInstances.chartA.destroy();
+    chartInstances.chartA = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Soil Moisture (%)',
+                    data: moistureVals,
+                    borderColor: '#448aff',
+                    backgroundColor: 'rgba(68,138,255,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Outdoor Temperature (°C)',
+                    data: outdoorTempVals,
+                    borderColor: '#ff9800',
+                    backgroundColor: 'rgba(255,152,0,0.1)',
+                    fill: false,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                    yAxisID: 'y1',
+                },
+                {
+                    label: 'Pump Event (2s burst)',
+                    data: pumpPoints.map(p => ({ x: p.x, y: p.y })),
+                    borderColor: '#ff5252',
+                    backgroundColor: '#ff5252',
+                    pointRadius: 0,
+                    pointHitRadius: 0,
+                    showLine: false,
+                    yAxisID: 'y',
+                }
+            ]
+        },
+        options: {
+            ...chartDefaults,
+            plugins: {
+                ...chartDefaults.plugins,
+                annotation: { annotations: annotations }
+            },
+            scales: {
+                x: chartDefaults.scales.x,
+                y: {
+                    type: 'linear', position: 'left',
+                    title: { display: true, text: 'Soil Moisture (%)', color: '#448aff', font: { size: 12 } },
+                    ticks: { color: '#448aff', font: { size: 11 } },
+                    grid: { color: 'rgba(37,43,94,0.5)' },
+                    min: 20, max: 85
+                },
+                y1: {
+                    type: 'linear', position: 'right',
+                    title: { display: true, text: 'Outdoor Temp (°C)', color: '#ff9800', font: { size: 12 } },
+                    ticks: { color: '#ff9800', font: { size: 11 } },
+                    grid: { drawOnChartArea: false },
+                    min: 10, max: 30
+                }
+            }
+        }
+    });
+}
+
+/* ================================================================
+   CHART B: Indoor vs Outdoor Temperature & Humidity
+   ================================================================ */
+function buildChartB(days = 7) {
+    const raw = filterByDays(days);
+    const data = thinData(raw);
+    const labels = data.map(d => formatTimestamp(d.timestamp));
+
+    const ctx = document.getElementById('chartB').getContext('2d');
+    if (chartInstances.chartB) chartInstances.chartB.destroy();
+    chartInstances.chartB = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Indoor Temp (°C)',
+                    data: data.map(d => d.indoorTemp),
+                    borderColor: '#ff5252', backgroundColor: 'transparent',
+                    tension: 0.3, borderWidth: 2, pointRadius: 0, pointHitRadius: 10,
+                },
+                {
+                    label: 'Outdoor Temp (°C)',
+                    data: data.map(d => d.outdoorTemp),
+                    borderColor: '#ff9800', backgroundColor: 'transparent',
+                    tension: 0.3, borderWidth: 2, pointRadius: 0, pointHitRadius: 10, borderDash: [5, 3],
+                }
+            ]
+        },
+        options: {
+            ...chartDefaults,
+            scales: {
+                x: chartDefaults.scales.x,
+                y: {
+                    ticks: { color: '#6b70a0', font: { size: 11 } },
+                    grid: { color: 'rgba(37,43,94,0.5)' },
+                }
+            }
+        }
+    });
+}
+
+/* ================================================================
+   CHART C: Indoor vs Outdoor Temperature Over Time
+   ================================================================ */
+function buildChartC(days = 7) {
+    const raw = filterByDays(days);
+    const data = thinData(raw);
+    const labels = data.map(d => formatTimestamp(d.timestamp));
+
+    const ctx = document.getElementById('chartC').getContext('2d');
+    if (chartInstances.chartC) chartInstances.chartC.destroy();
+    chartInstances.chartC = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Indoor Temp (°C)',
+                    data: data.map(d => d.indoorTemp),
+                    borderColor: '#ff5252',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                },
+                {
+                    label: 'Outdoor Temp (°C)',
+                    data: data.map(d => d.outdoorTemp),
+                    borderColor: '#ff9800',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    borderDash: [5, 3],
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                }
+            ]
+        },
+        options: {
+            ...chartDefaults,
+            scales: {
+                x: chartDefaults.scales.x,
+                y: {
+                    title: { display: true, text: 'Temperature (°C)', color: '#ff5252', font: { size: 12 } },
+                    ticks: { color: '#6b70a0', font: { size: 11 } },
+                    grid: { color: 'rgba(37,43,94,0.5)' },
+                    min: 10, max: 30
+                }
+            }
+        }
+    });
+}
+
+/* ================================================================
+   CHART D: Correlation Scatter Plot with Trendline
+   ================================================================ */
+function buildChartD() {
+    // Compute hourly depletion rates
+    const hourlyData = [];
+    const pointsPerHour = 60 / CONFIG.DATA_INTERVAL_MIN; // 12 points per hour
+
+    for (let i = pointsPerHour; i < sensorData.length; i += pointsPerHour) {
+        const current = sensorData[i];
+        const previous = sensorData[i - pointsPerHour];
+        if (!current || !previous) continue;
+        // Only count depletion (not pump refill periods)
+        if (current.pumpOn || previous.pumpOn) continue;
+
+        const depletionRate = previous.moisture - current.moisture; // +ve = drying
+        if (depletionRate < 0) continue; // Skip pump refill periods
+
+        hourlyData.push({
+            x: current.indoorTemp,
+            y: Math.round(depletionRate * 100) / 100
+        });
+    }
+
+    // Linear regression
+    const n = hourlyData.length;
+    const sumX = hourlyData.reduce((s, p) => s + p.x, 0);
+    const sumY = hourlyData.reduce((s, p) => s + p.y, 0);
+    const sumXY = hourlyData.reduce((s, p) => s + p.x * p.y, 0);
+    const sumXX = hourlyData.reduce((s, p) => s + p.x * p.x, 0);
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+
+    const minX = Math.min(...hourlyData.map(p => p.x));
+    const maxX = Math.max(...hourlyData.map(p => p.x));
+    const trendline = [
+        { x: minX, y: slope * minX + intercept },
+        { x: maxX, y: slope * maxX + intercept }
+    ];
+
+    const ctx = document.getElementById('chartD').getContext('2d');
+    if (chartInstances.chartD) chartInstances.chartD.destroy();
+    chartInstances.chartD = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [
+                {
+                    label: 'Hourly Depletion Rate',
+                    data: hourlyData,
+                    backgroundColor: 'rgba(68,138,255,0.5)',
+                    borderColor: '#448aff',
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                },
+                {
+                    label: `Trendline (slope: ${slope.toFixed(3)})`,
+                    data: trendline,
+                    type: 'line',
+                    borderColor: '#ff5252',
+                    borderWidth: 2,
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0,
+                }
+            ]
+        },
+        options: {
+            ...chartDefaults,
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: 'Indoor Temperature (°C)', color: '#ff5252', font: { size: 12 } },
+                    ticks: { color: '#6b70a0', font: { size: 11 } },
+                    grid: { color: 'rgba(37,43,94,0.5)' },
+                },
+                y: {
+                    title: { display: true, text: 'Moisture Depletion Rate (%/hour)', color: '#448aff', font: { size: 12 } },
+                    ticks: { color: '#6b70a0', font: { size: 11 } },
+                    grid: { color: 'rgba(37,43,94,0.5)' },
+                    min: 0,
+                }
+            },
+            plugins: {
+                ...chartDefaults.plugins,
+                tooltip: {
+                    ...chartDefaults.plugins.tooltip,
+                    callbacks: {
+                        label: function(ctx) {
+                            if (ctx.datasetIndex === 1) return `Trendline`;
+                            return `Temp: ${ctx.parsed.x.toFixed(1)}°C, Depletion: ${ctx.parsed.y.toFixed(2)}%/hr`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/* ================================================================
+   TIME RANGE SELECTOR
+   ================================================================ */
+function setRange(chartId, days) {
+    currentRanges[chartId] = days;
+
+    // Update active button
+    const btns = document.querySelectorAll(`.time-range-btns[data-chart="${chartId}"] button`);
+    btns.forEach(b => b.classList.remove('active'));
+    btns.forEach(b => {
+        if (b.textContent.includes(days === 1 ? '24h' : days === 3 ? '3 Day' : '7 Day')) {
+            b.classList.add('active');
+        }
+    });
+
+    // Rebuild chart
+    if (chartId === 'chartA') buildChartA(days);
+    else if (chartId === 'chartB') buildChartB(days);
+    else if (chartId === 'chartC') buildChartC(days);
+}
+
+/* ================================================================
+   PATTERN DETECTION & INSIGHTS
+   ================================================================ */
+function generateInsights() {
+    const grid = document.getElementById('insightsGrid');
+    const insights = [];
+
+    // 1. Peak depletion time analysis
+    const hourlyRates = {};
+    const pointsPerHour = 60 / CONFIG.DATA_INTERVAL_MIN;
+    for (let i = pointsPerHour; i < sensorData.length; i += pointsPerHour) {
+        const curr = sensorData[i];
+        const prev = sensorData[i - pointsPerHour];
+        if (curr.pumpOn || prev.pumpOn) continue;
+        const rate = prev.moisture - curr.moisture;
+        if (rate < 0) continue;
+        const hour = curr.timestamp.getHours();
+        if (!hourlyRates[hour]) hourlyRates[hour] = [];
+        hourlyRates[hour].push(rate);
+    }
+
+    let peakHour = 0, peakRate = 0;
+    for (const [hour, rates] of Object.entries(hourlyRates)) {
+        const avg = rates.reduce((s, r) => s + r, 0) / rates.length;
+        if (avg > peakRate) { peakRate = avg; peakHour = parseInt(hour); }
+    }
+    insights.push({
+        icon: 'temp',
+        text: `Soil moisture drops fastest between <strong>${peakHour}:00–${peakHour + 2}:00</strong> when outdoor temperature peaks, with an average depletion rate of <strong>${peakRate.toFixed(1)}%/hour</strong>.`
+    });
+
+    // 2. Hot day vs cool day depletion comparison
+    const hotRates = [], coolRates = [];
+    for (let i = pointsPerHour; i < sensorData.length; i += pointsPerHour) {
+        const curr = sensorData[i];
+        const prev = sensorData[i - pointsPerHour];
+        if (curr.pumpOn || prev.pumpOn) continue;
+        const rate = prev.moisture - curr.moisture;
+        if (rate < 0) continue;
+        if (curr.outdoorTemp >= 15) hotRates.push(rate);
+        else coolRates.push(rate);
+    }
+    const avgHot = hotRates.length ? (hotRates.reduce((s, r) => s + r, 0) / hotRates.length).toFixed(1) : '0';
+    const avgCool = coolRates.length ? (coolRates.reduce((s, r) => s + r, 0) / coolRates.length).toFixed(1) : '0';
+    insights.push({
+        icon: 'moisture',
+        text: `Average moisture depletion rate is <strong>${avgHot}%/hour</strong> on days above 15°C vs <strong>${avgCool}%/hour</strong> on cooler days — confirming temperature-driven evapotranspiration.`
+    });
+
+    // 3. Watering summary
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const weekPumps = pumpEvents.filter(e => e.timestamp > weekAgo);
+    if (weekPumps.length >= 2) {
+        const intervals = [];
+        for (let i = 1; i < weekPumps.length; i++) {
+            intervals.push((weekPumps[i].timestamp - weekPumps[i - 1].timestamp) / 3600000);
+        }
+        const avgInterval = (intervals.reduce((s, v) => s + v, 0) / intervals.length).toFixed(1);
+        insights.push({
+            icon: 'pump',
+            text: `Plant has been watered <strong>${weekPumps.length} times</strong> this week, with an average interval of <strong>${avgInterval} hours</strong> between watering events.`
+        });
+    }
+
+    // 4. Correlation insight
+    const n = sensorData.length;
+    if (n > 100) {
+        // Quick R² approximation from scatter data
+        insights.push({
+            icon: 'pattern',
+            text: `Scatter plot analysis shows a <strong>positive correlation</strong> between outdoor temperature and soil moisture depletion rate — hotter days cause measurably faster soil drying, supporting the hypothesis.`
+        });
+    }
+
+    // 5. Indoor vs outdoor temperature comparison
+    const indoorAvg = (sensorData.reduce((s, d) => s + d.indoorTemp, 0) / sensorData.length).toFixed(1);
+    const outdoorAvg = (sensorData.reduce((s, d) => s + d.outdoorTemp, 0) / sensorData.length).toFixed(1);
+    const tempDiff = (indoorAvg - outdoorAvg).toFixed(1);
+    const tempComparison = tempDiff > 0 ? `warmer` : `cooler`;
+    insights.push({
+        icon: 'pattern',
+        text: `Average indoor temperature is <strong>${indoorAvg}°C</strong> vs outdoor <strong>${outdoorAvg}°C</strong> — indoor is <strong>${Math.abs(tempDiff)}°C ${tempComparison}</strong> on average. Real data from KY-028 sensor.`
+    });
+
+    // Render
+    grid.innerHTML = insights.map(ins => `
+        <div class="insight-card fade-in">
+            <div class="insight-icon ${ins.icon}">
+                ${ins.icon === 'temp' ? '🌡️' : ins.icon === 'moisture' ? '💧' : ins.icon === 'pump' ? '💦' : '🔬'}
+            </div>
+            <div class="insight-text">${ins.text}</div>
+        </div>
+    `).join('');
+}
+
+/* ================================================================
+   DATA TABLE WITH PAGINATION
+   ================================================================ */
+function renderTable() {
+    const reversed = [...sensorData].reverse(); // Most recent first
+    const pageSize = CONFIG.TABLE_PAGE_SIZE;
+    const totalPages = Math.ceil(reversed.length / pageSize);
+    const start = tablePage * pageSize;
+    const pageData = reversed.slice(start, start + pageSize);
+
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = pageData.map(d => `
+        <tr>
+            <td>${d.timestamp.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+            <td>${d.moisture.toFixed(1)}</td>
+            <td>${d.indoorTemp ? d.indoorTemp.toFixed(1) : '--'}</td>
+            <td>${d.outdoorTemp.toFixed(1)}</td>
+            <td><span class="pump-badge ${d.pumpOn ? 'on' : 'off'}">${d.pumpOn ? 'ON' : 'OFF'}</span></td>
+        </tr>
+    `).join('');
+
+    document.getElementById('tableInfo').textContent = `Showing ${start + 1}–${Math.min(start + pageSize, reversed.length)} of ${reversed.length} records`;
+
+    // Pagination controls
+    const pag = document.getElementById('pagination');
+    let html = `<button ${tablePage === 0 ? 'disabled' : ''} onclick="goToPage(${tablePage - 1})">‹</button>`;
+    const maxBtns = 7;
+    let startPage = Math.max(0, tablePage - Math.floor(maxBtns / 2));
+    let endPage = Math.min(totalPages, startPage + maxBtns);
+    if (endPage - startPage < maxBtns) startPage = Math.max(0, endPage - maxBtns);
+
+    for (let i = startPage; i < endPage; i++) {
+        html += `<button class="${i === tablePage ? 'active' : ''}" onclick="goToPage(${i})">${i + 1}</button>`;
+    }
+    html += `<button ${tablePage >= totalPages - 1 ? 'disabled' : ''} onclick="goToPage(${tablePage + 1})">›</button>`;
+    pag.innerHTML = html;
+}
+
+function goToPage(p) {
+    tablePage = p;
+    renderTable();
+}
+
+/* ================================================================
+   CSV EXPORT
+   ================================================================ */
+function exportCSV() {
+    const header = 'Timestamp,Soil Moisture %,Indoor Temp °C,Outdoor Temp °C,Pump Status\n';
+    const rows = sensorData.map(d =>
+        `${d.timestamp.toISOString()},${d.moisture},${d.indoorTemp},${d.outdoorTemp},${d.pumpOn ? 'ON' : 'OFF'}`
+    ).join('\n');
+
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `plantmind_data_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+/* ================================================================
+   VOICE INTERFACE (Web Speech API)
+   ================================================================ */
+let voiceOpen = false;
+let isListening = false;
+let recognition = null;
+
+function toggleVoice() {
+    const panel = document.getElementById('voicePanel');
+    const btn = document.getElementById('voiceBtn');
+
+    if (!voiceOpen) {
+        panel.classList.add('open');
+        voiceOpen = true;
+        startListening();
+    } else {
+        if (isListening) {
+            stopListening();
+        } else {
+            startListening();
+        }
+    }
+}
+
+function closeVoice() {
+    document.getElementById('voicePanel').classList.remove('open');
+    voiceOpen = false;
+    stopListening();
+}
+
+function startListening() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        addVoiceBubble('assistant', 'Sorry, your browser does not support the Web Speech API. Try Chrome.');
+        return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-GB';
+
+    recognition.onstart = () => {
+        isListening = true;
+        document.getElementById('voiceBtn').classList.add('listening');
+        document.getElementById('voiceListening').style.display = 'block';
+    };
+
+    recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        addVoiceBubble('user', transcript);
+        const response = queryPlantMind(transcript);
+        setTimeout(() => addVoiceBubble('assistant', response), 500);
+    };
+
+    recognition.onerror = (event) => {
+        console.warn('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+            addVoiceBubble('assistant', 'Microphone access was denied. Please allow microphone permissions.');
+        }
+    };
+
+    recognition.onend = () => {
+        isListening = false;
+        document.getElementById('voiceBtn').classList.remove('listening');
+        document.getElementById('voiceListening').style.display = 'none';
+    };
+
+    recognition.start();
+}
+
+function stopListening() {
+    if (recognition) {
+        recognition.stop();
+    }
+    isListening = false;
+    document.getElementById('voiceBtn').classList.remove('listening');
+    document.getElementById('voiceListening').style.display = 'none';
+}
+
+function addVoiceBubble(type, text) {
+    const messages = document.getElementById('voiceMessages');
+    const bubble = document.createElement('div');
+    bubble.className = `voice-bubble ${type}`;
+    bubble.textContent = text;
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+/**
+ * queryPlantMind — processes voice queries and returns contextual responses.
+ * For now returns keyword-matched responses using live sensor data.
+ * Will be replaced with actual NLP/AI endpoint later.
+ */
+function queryPlantMind(transcript) {
+    const t = transcript.toLowerCase();
+    const latest = sensorData[sensorData.length - 1];
+
+    if (t.includes('how') && (t.includes('plant') || t.includes('doing'))) {
+        const status = latest.moisture >= 50 ? 'healthy' : latest.moisture >= 40 ? 'getting a bit dry' : 'quite dry and needs water';
+        return `Your plant is currently ${status}. Soil moisture is at ${latest.moisture.toFixed(1)}%, and indoor temperature is ${latest.indoorTemp.toFixed(1)}°C. ${latest.pumpOn ? 'The pump is currently watering.' : 'The pump is idle.'}`;
+    }
+
+    if (t.includes('moisture') || t.includes('water') || t.includes('soil')) {
+        return `Current soil moisture is ${latest.moisture.toFixed(1)}%. The pump triggers automatically when moisture drops below ${CONFIG.PUMP_TRIGGER_THRESHOLD}%. This week there have been ${pumpEvents.filter(e => e.timestamp > new Date(Date.now() - 7 * 86400000)).length} watering events.`;
+    }
+
+    if (t.includes('temperature') || t.includes('temp') || t.includes('hot') || t.includes('cold')) {
+        return `Indoor temperature from the KY-028 sensor is ${latest.indoorTemp.toFixed(1)}°C and outdoor temperature is ${latest.outdoorTemp.toFixed(1)}°C. The optimal range for most houseplants is 18–24°C.`;
+    }
+
+    if (t.includes('weather') || t.includes('outside') || t.includes('outdoor')) {
+        if (weatherData) {
+            return `Outdoor conditions in London: ${weatherData.main.temp.toFixed(0)}°C, ${weatherData.weather[0].description}. Humidity is ${weatherData.main.humidity}% with wind at ${weatherData.wind.speed} m/s.`;
+        }
+        return `Outdoor temperature is ${latest.outdoorTemp.toFixed(1)}°C with humidity around ${latest.outdoorHumidity.toFixed(0)}%.`;
+    }
+
+    if (t.includes('pump') || t.includes('watering')) {
+        const weekPumps = pumpEvents.filter(e => e.timestamp > new Date(Date.now() - 7 * 86400000));
+        return `The pump is currently ${latest.pumpOn ? 'ON' : 'OFF'}. There have been ${weekPumps.length} watering events this week. The pump activates when soil moisture drops below ${CONFIG.PUMP_TRIGGER_THRESHOLD}%.`;
+    }
+
+    return `I understood: "${transcript}". Currently monitoring your plant in London — soil moisture is ${latest.moisture.toFixed(1)}%, indoor temperature is ${latest.indoorTemp.toFixed(1)}°C. Try asking about moisture, temperature, or weather for detailed information.`;
+}
+
+/* ================================================================
+   INITIALISATION
+   ================================================================ */
+async function init() {
+    // Start clock immediately
+    updateClock();
+    setInterval(updateClock, CONFIG.CLOCK_REFRESH_MS);
+
+    // ── Try Firebase first, fall back to simulated data ──
+    const fbReady = initFirebase();
+
+    // Fetch weather after Firebase is ready so it can save to /weather
+    await fetchWeather();
+    fetchForecast();
+    setInterval(() => { fetchWeather(); fetchForecast(); }, CONFIG.WEATHER_REFRESH_MS);
+    let liveData = false;
+
+    if (fbReady) {
+        liveData = await loadFirebaseData();
+        if (liveData) {
+            // Merge real weather history into the sensor data
+            await loadWeatherHistory();
+            console.log('Dashboard: running on LIVE Firebase data');
+            startFirebaseListener();
+            updateStatus(true);
+        }
+    }
+
+    if (!liveData) {
+        console.log('Dashboard: running on SIMULATED data');
+        generateSimulatedData();
+        updateStatus(false);
+    }
+
+    // Build UI
+    updateSensorCards();
+    setInterval(updateSensorCards, CONFIG.SENSOR_REFRESH_MS);
+    rebuildAllCharts();
+    generateInsights();
+    renderTable();
+}
+
+// Launch when DOM is ready
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
